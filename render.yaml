@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: muleguard-backend
+    env: python
+    region: ohio
+    plan: free
+    buildCommand: "pip install -r backend/backend/requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: FRONTEND_ORIGINS
+        value: "https://your-vercel-app-url.vercel.app"
