@@ -22,20 +22,25 @@ from app.database import init_db, SessionLocal, SuspiciousHistory
 # APP INITIALIZATION
 # =====================================================
 app = FastAPI(title="MuleGuard AI Backend")
+
+# =====================================================
+# CORS — reads from env var, with safe hardcoded defaults
+# =====================================================
 DEFAULT_FRONTEND_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://mule-guard-ai-7j47.vercel.app",  # ← your production frontend
 ]
-frontend_origins = [
-    origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
+
+env_origins = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
     if origin.strip()
 ]
-if not frontend_origins:
-    frontend_origins = DEFAULT_FRONTEND_ORIGINS
 
-# =====================================================
-# CORS (OPEN FOR DEV + RENDER SAFE)
-# =====================================================
+# Merge env-provided origins with defaults (deduplicated)
+frontend_origins = list(set(DEFAULT_FRONTEND_ORIGINS + env_origins))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
@@ -193,10 +198,7 @@ async def upload_file(file: UploadFile = File(...)):
 
         processing_time = round(time.time() - start_time, 2)
 
-        # =====================================================
-        # FIX: JSON SERIALIZATION ISSUE
-        # Convert timestamp to string
-        # =====================================================
+        # Convert timestamp to string for JSON serialization
         df["timestamp"] = df["timestamp"].astype(str)
 
         # =====================================================
