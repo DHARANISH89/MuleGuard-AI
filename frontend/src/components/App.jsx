@@ -3,26 +3,59 @@ import * as d3 from 'd3';
 import './App.css';
 
 // ============================================
-// CONFIG — set your deployed backend URL here
+// CONFIG
 // ============================================
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-console.log('🔍 API_BASE:', API_BASE);
+const API_BASE    = process.env.REACT_APP_API_URL    || 'http://localhost:8000';
+const API_KEY     = process.env.REACT_APP_API_KEY    || '';   // set in Vercel env vars
+const MAX_FILE_MB = 10;
 
-// Icons
-const Icons = {
-  Search: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>,
-  Upload: () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
-  Download: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-  Filter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
-  Close: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-  Refresh: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>,
-  Ring: () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>,
-  Alert: () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-  Server: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
+// Auth headers — included on every protected request
+const authHeaders = () =>
+  API_KEY ? { 'X-API-Key': API_KEY } : {};
+
+// Safe fetch with timeout (AbortSignal.timeout not supported everywhere)
+const fetchWithTimeout = (url, options = {}, ms = 8000) => {
+  const ctrl = new AbortController();
+  const id   = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(id));
+};
+
+// User-friendly error messages
+const friendlyError = (msg = '') => {
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_FAILED'))
+    return 'Cannot reach the server. It may be starting up — wait 30 s and try again.';
+  if (msg.includes('429'))
+    return 'Too many uploads. Please wait a minute before trying again.';
+  if (msg.includes('413'))
+    return `File too large. Maximum size is ${MAX_FILE_MB} MB.`;
+  if (msg.includes('missing_columns') || msg.includes('missing required'))
+    return 'CSV is missing required columns: transaction_id, sender_id, receiver_id, amount, timestamp.';
+  if (msg.includes('timestamp'))
+    return 'One or more timestamp values are invalid. Use ISO 8601 format (e.g. 2024-01-15T10:30:00).';
+  if (msg.includes('403'))
+    return 'Access denied. Check your API key configuration.';
+  if (msg.includes('500'))
+    return 'Server error during analysis. Check your CSV data and try again.';
+  return msg;
 };
 
 // ============================================
-// CLOCK HOOK — fixed to show real UTC time
+// ICONS
+// ============================================
+const Icons = {
+  Search:   () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>,
+  Upload:   () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+  Download: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  Filter:   () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+  Close:    () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  Refresh:  () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>,
+  Ring:     () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>,
+  Alert:    () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  Server:   () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
+};
+
+// ============================================
+// CLOCK HOOK — real UTC time
 // ============================================
 const useClock = () => {
   const [time, setTime] = useState('');
@@ -41,19 +74,23 @@ const useClock = () => {
   return time;
 };
 
-// Search Component
-const SearchBar = ({ value, onChange, placeholder = "Search accounts, rings..." }) => (
+// ============================================
+// SEARCH BAR
+// ============================================
+const SearchBar = ({ value, onChange, placeholder = 'Search accounts, rings...' }) => (
   <div className="search-bar">
     <div className="search-input-wrap">
       <Icons.Search />
-      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
       {value && <button className="clear-btn" onClick={() => onChange('')}><Icons.Close /></button>}
     </div>
     <button className="filter-btn"><Icons.Filter /><span>Filter</span></button>
   </div>
 );
 
-// Navbar
+// ============================================
+// NAVBAR
+// ============================================
 const Navbar = ({ searchValue, onSearchChange, hasData, backendStatus }) => {
   const clock = useClock();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -63,10 +100,7 @@ const Navbar = ({ searchValue, onSearchChange, hasData, backendStatus }) => {
       <div className="nav-inner">
         <div className="logo">
           <div className="logo-box">R</div>
-          <div className="logo-text">
-            <h1>M.G</h1>
-            <span>MULE GUARD AI</span>
-          </div>
+          <div className="logo-text"><h1>M.G</h1><span>MULE GUARD AI</span></div>
         </div>
 
         {hasData && (
@@ -83,7 +117,7 @@ const Navbar = ({ searchValue, onSearchChange, hasData, backendStatus }) => {
           <span className="clock">{clock}</span>
         </div>
 
-        <button className="menu-btn mobile-only" onClick={() => setMobileOpen(!mobileOpen)}>
+        <button className="menu-btn mobile-only" onClick={() => setMobileOpen(o => !o)}>
           {mobileOpen ? '✕' : '☰'}
         </button>
       </div>
@@ -98,7 +132,9 @@ const Navbar = ({ searchValue, onSearchChange, hasData, backendStatus }) => {
   );
 };
 
-// Radar Animation
+// ============================================
+// RADAR
+// ============================================
 const Radar = () => (
   <div className="radar">
     <div className="radar-sweep"></div>
@@ -107,58 +143,73 @@ const Radar = () => (
   </div>
 );
 
-// Upload Zone
+// ============================================
+// UPLOAD ZONE — with client-side size check
+// ============================================
 const UploadZone = ({ onFile, processing, backendStatus }) => {
-  const [drag, setDrag] = useState(false);
-  const inputRef = useRef(null);
+  const [drag, setDrag]     = useState(false);
+  const [sizeErr, setSizeErr] = useState('');
+  const inputRef            = useRef(null);
+
+  const handleFile = (file) => {
+    setSizeErr('');
+    if (!file?.name.toLowerCase().endsWith('.csv')) {
+      setSizeErr('Only .csv files are accepted.');
+      return;
+    }
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      setSizeErr(`File too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum is ${MAX_FILE_MB} MB.`);
+      return;
+    }
+    onFile(file);
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDrag(false);
-    const file = e.dataTransfer.files[0];
-    if (file?.name.endsWith('.csv')) onFile(file);
+    handleFile(e.dataTransfer.files[0]);
   };
 
   return (
     <div
       className={`upload-zone ${drag ? 'dragover' : ''} ${processing ? 'processing' : ''}`}
-      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragOver={e => { e.preventDefault(); setDrag(true); }}
       onDragLeave={() => setDrag(false)}
       onDrop={handleDrop}
     >
-      <input
-        type="file"
-        ref={inputRef}
-        accept=".csv"
-        hidden
-        onChange={(e) => e.target.files[0] && onFile(e.target.files[0])}
-      />
+      <input type="file" ref={inputRef} accept=".csv" hidden
+        onChange={e => handleFile(e.target.files[0])} />
       <div className="upload-content">
         <div className="upload-icon"><Icons.Upload /></div>
         <h3>INITIALIZE DATA STREAM</h3>
         <p>Drop CSV transaction data or click to browse</p>
-        {backendStatus === 'offline' && (
+
+        {sizeErr && <div className="backend-warning">⚠ {sizeErr}</div>}
+        {!sizeErr && backendStatus === 'offline' && (
           <div className="backend-warning">
-            ⚠ Backend offline — check <code>REACT_APP_API_URL</code> in Vercel Environment Variables
+            ⚠ Backend offline — it may still be warming up. Try uploading anyway.
           </div>
         )}
+
         <button className="btn-primary" onClick={() => inputRef.current?.click()} disabled={processing}>
           {processing ? 'UPLOADING TO BACKEND...' : 'SELECT FILE'}
         </button>
         <div className="file-fields">
-          <span>transaction_id</span>
-          <span>sender_id</span>
-          <span>receiver_id</span>
-          <span>amount</span>
-          <span>timestamp</span>
+          <span>transaction_id</span><span>sender_id</span><span>receiver_id</span>
+          <span>amount</span><span>timestamp</span>
         </div>
+        <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '8px' }}>
+          Max {MAX_FILE_MB} MB · CSV only · up to 100,000 rows
+        </p>
       </div>
       {processing && <div className="scan-line"></div>}
     </div>
   );
 };
 
-// Processing Status
+// ============================================
+// PROCESSING STATUS
+// ============================================
 const ProcessingStatus = ({ progress, msg, mode }) => (
   <div className="processing-status">
     <div className="status-box">
@@ -172,7 +223,9 @@ const ProcessingStatus = ({ progress, msg, mode }) => (
   </div>
 );
 
-// Error Banner
+// ============================================
+// ERROR BANNER
+// ============================================
 const ErrorBanner = ({ error, onDismiss }) => (
   <div className="error-banner">
     <Icons.Alert />
@@ -186,7 +239,7 @@ const ErrorBanner = ({ error, onDismiss }) => (
 // ============================================
 const buildGraphData = (rawTransactions) => {
   const nodeMap = new Map();
-  const links = [];
+  const links   = [];
 
   (rawTransactions || []).forEach(d => {
     const sid = String(d.sender_id);
@@ -197,13 +250,7 @@ const buildGraphData = (rawTransactions) => {
     if (!nodeMap.has(rid)) nodeMap.set(rid, { id: rid, in: [], out: [] });
 
     const amount = parseFloat(d.amount) || 0;
-    links.push({
-      source: sid,
-      target: rid,
-      amount,
-      timestamp: d.timestamp,
-      id: d.transaction_id,
-    });
+    links.push({ source: sid, target: rid, amount, timestamp: d.timestamp, id: d.transaction_id });
     nodeMap.get(sid).out.push({ target: rid, amount });
     nodeMap.get(rid).in.push({ source: sid, amount });
   });
@@ -215,19 +262,20 @@ const buildGraphData = (rawTransactions) => {
 // GRAPH VISUALIZATION
 // ============================================
 const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNode }) => {
-  const svgRef = useRef(null);
+  const svgRef       = useRef(null);
   const containerRef = useRef(null);
-  const simRef = useRef(null);
-  const zoomRef = useRef(null);
-  const tooltipRef = useRef(null); // FIX: use a ref instead of d3.select('body')
-  const [, setZoom] = useState(1);
-  const [physics, setPhysics] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
-  const [nodeCount, setNodeCount] = useState(0);
-  const [linkCount, setLinkCount] = useState(0);
-  const [ringCount, setRingCount] = useState(0);
+  const simRef       = useRef(null);
+  const zoomRef      = useRef(null);
+  const tooltipRef   = useRef(null);   // single DOM node, no d3.select('body') leak
 
-  // Build ring membership map for fast lookup
+  const [, setZoom]       = useState(1);
+  const [physics, setPhysics]       = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
+  const [nodeCount, setNodeCount]   = useState(0);
+  const [linkCount, setLinkCount]   = useState(0);
+  const [ringCount, setRingCount]   = useState(0);
+
+  // Ring membership lookup
   const ringMemberMap = useMemo(() => {
     const map = new Map();
     (analysisData?.fraud_rings || []).forEach(ring => {
@@ -238,38 +286,31 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 
   const { displayNodes, displayLinks } = useMemo(() => {
     if (!analysisData) return { displayNodes: [], displayLinks: [] };
-
     const { suspicious_accounts = [], nodeMap, links: allLinks = [] } = analysisData;
 
     const showSet = new Set();
-
-    const filteredAccounts = searchTerm
+    const filtered = searchTerm
       ? suspicious_accounts.filter(a => String(a.account_id).toLowerCase().includes(searchTerm.toLowerCase()))
       : suspicious_accounts;
 
-    filteredAccounts.forEach(a => showSet.add(String(a.account_id)));
+    filtered.forEach(a => showSet.add(String(a.account_id)));
 
     (allLinks || []).forEach(l => {
       const s = String(l.source), t = String(l.target);
-      if (showSet.has(s) || showSet.has(t)) {
-        showSet.add(s);
-        showSet.add(t);
-      }
+      if (showSet.has(s) || showSet.has(t)) { showSet.add(s); showSet.add(t); }
     });
 
     const nodeArr = Array.from(showSet).map(id => {
-      const node = nodeMap?.get(id);
-      const acc = suspicious_accounts.find(a => String(a.account_id) === id);
+      const node  = nodeMap?.get(id);
+      const acc   = suspicious_accounts.find(a => String(a.account_id) === id);
       const ringId = ringMemberMap.get(id) || acc?.ring_id || null;
-      const risk = acc?.suspicion_score ?? 20;
-
       return {
         id,
-        risk,
-        type: ringId ? 'ring' : acc ? 'suspicious' : 'normal',
+        risk:     acc?.suspicion_score ?? 20,
+        type:     ringId ? 'ring' : acc ? 'suspicious' : 'normal',
         ringId,
         patterns: acc?.detected_patterns || [],
-        inCount: node?.in?.length || 0,
+        inCount:  node?.in?.length  || 0,
         outCount: node?.out?.length || 0,
       };
     });
@@ -287,7 +328,7 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
     setRingCount((analysisData?.fraud_rings || []).length);
   }, [displayNodes, displayLinks, analysisData]);
 
-  // Create tooltip div once
+  // Create tooltip div once, clean up on unmount
   useEffect(() => {
     const tip = document.createElement('div');
     tip.className = 'node-tooltip';
@@ -295,9 +336,8 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
     document.body.appendChild(tip);
     tooltipRef.current = tip;
     return () => {
-      if (tooltipRef.current && document.body.contains(tooltipRef.current)) {
+      if (tooltipRef.current && document.body.contains(tooltipRef.current))
         document.body.removeChild(tooltipRef.current);
-      }
     };
   }, []);
 
@@ -317,9 +357,9 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 
     const glow = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
     glow.append('feGaussianBlur').attr('in', 'SourceGraphic').attr('stdDeviation', '4').attr('result', 'blur');
-    const feMerge = glow.append('feMerge');
-    feMerge.append('feMergeNode').attr('in', 'blur');
-    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+    const fm1 = glow.append('feMerge');
+    fm1.append('feMergeNode').attr('in', 'blur');
+    fm1.append('feMergeNode').attr('in', 'SourceGraphic');
 
     const glowMild = defs.append('filter').attr('id', 'glow-mild').attr('x', '-30%').attr('y', '-30%').attr('width', '160%').attr('height', '160%');
     glowMild.append('feGaussianBlur').attr('in', 'SourceGraphic').attr('stdDeviation', '2').attr('result', 'blur');
@@ -327,31 +367,25 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
     fm2.append('feMergeNode').attr('in', 'blur');
     fm2.append('feMergeNode').attr('in', 'SourceGraphic');
 
-    defs.append('marker')
-      .attr('id', 'arrow-normal').attr('viewBox', '0 -4 8 8').attr('refX', 14).attr('refY', 0)
+    defs.append('marker').attr('id', 'arrow-normal').attr('viewBox', '0 -4 8 8').attr('refX', 14).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
       .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#00f3ff').attr('opacity', 0.6);
 
-    defs.append('marker')
-      .attr('id', 'arrow-high').attr('viewBox', '0 -4 8 8').attr('refX', 14).attr('refY', 0)
+    defs.append('marker').attr('id', 'arrow-high').attr('viewBox', '0 -4 8 8').attr('refX', 14).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
       .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#ff003c').attr('opacity', 0.8);
 
-    const pattern = defs.append('pattern')
-      .attr('id', 'grid').attr('width', 40).attr('height', 40).attr('patternUnits', 'userSpaceOnUse');
+    const pattern = defs.append('pattern').attr('id', 'grid').attr('width', 40).attr('height', 40).attr('patternUnits', 'userSpaceOnUse');
     pattern.append('path').attr('d', 'M 40 0 L 0 0 0 40').attr('fill', 'none').attr('stroke', 'rgba(0,243,255,0.04)').attr('stroke-width', 1);
 
     svgEl.append('rect').attr('width', W).attr('height', H).attr('fill', 'url(#grid)');
-
     const g = svgEl.append('g').attr('class', 'graph-g');
 
     // ---- Zoom ----
-    const zoomBehavior = d3.zoom()
-      .scaleExtent([0.08, 6])
-      .on('zoom', (e) => {
-        g.attr('transform', e.transform);
-        setZoom(e.transform.k);
-      });
+    const zoomBehavior = d3.zoom().scaleExtent([0.08, 6]).on('zoom', e => {
+      g.attr('transform', e.transform);
+      setZoom(e.transform.k);
+    });
     zoomRef.current = zoomBehavior;
     svgEl.call(zoomBehavior);
 
@@ -366,21 +400,17 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 
     const ringCenters = new Map();
     let ri = 0;
-    ringGroups.forEach((members, ringId) => {
+    ringGroups.forEach((_, ringId) => {
       const angle = (ri / (ringGroups.size || 1)) * Math.PI * 2;
-      const r = Math.min(W, H) * 0.28;
-      ringCenters.set(ringId, {
-        x: W / 2 + r * Math.cos(angle),
-        y: H / 2 + r * Math.sin(angle),
-      });
+      const r     = Math.min(W, H) * 0.28;
+      ringCenters.set(ringId, { x: W / 2 + r * Math.cos(angle), y: H / 2 + r * Math.sin(angle) });
       ri++;
     });
 
-    // ---- Force Simulation ----
+    // ---- Simulation ----
     const nodesCopy = displayNodes.map(d => ({ ...d }));
     const linksCopy = displayLinks.map(d => ({ ...d }));
-
-    const nodeById = new Map(nodesCopy.map(n => [n.id, n]));
+    const nodeById  = new Map(nodesCopy.map(n => [n.id, n]));
 
     const resolvedLinks = linksCopy.map(l => ({
       ...l,
@@ -389,30 +419,29 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
     })).filter(l => typeof l.source === 'object' && typeof l.target === 'object');
 
     const sim = d3.forceSimulation(nodesCopy)
-      .force('link', d3.forceLink(resolvedLinks)
-        .id(d => d.id)
+      .force('link', d3.forceLink(resolvedLinks).id(d => d.id)
         .distance(d => {
-          const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-          if (isRingLink) return 70;
+          const ring = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
+          if (ring) return 70;
           if (d.amount > 10000) return 120;
-          if (d.amount > 1000) return 95;
+          if (d.amount > 1000)  return 95;
           return 80;
         })
         .strength(d => {
-          const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-          return isRingLink ? 0.9 : 0.3;
+          const ring = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
+          return ring ? 0.9 : 0.3;
         })
       )
       .force('charge', d3.forceManyBody().strength(d => {
         if (d.type === 'ring') return -600;
-        if (d.risk > 80) return -400;
-        if (d.risk > 50) return -250;
+        if (d.risk > 80)       return -400;
+        if (d.risk > 50)       return -250;
         return -150;
       }))
       .force('center', d3.forceCenter(W / 2, H / 2).strength(0.05))
       .force('collision', d3.forceCollide().radius(d => {
         if (d.type === 'ring') return 36;
-        if (d.risk > 80) return 24;
+        if (d.risk > 80)       return 24;
         return 16;
       }).strength(0.8))
       .force('cluster', alpha => {
@@ -429,95 +458,71 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 
     simRef.current = sim;
 
-    // ---- Links ----
+    // ---- Link color helper ----
     const linkColor = d => {
       if (d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId) return '#ff00ff';
       if (d.amount > 10000) return '#ff003c';
-      if (d.amount > 5000) return '#ff6b6b';
-      if (d.amount > 1000) return '#ffd93d';
+      if (d.amount > 5000)  return '#ff6b6b';
+      if (d.amount > 1000)  return '#ffd93d';
       return '#00f3ff';
     };
+    const isRingLink = d => d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
 
-    const linkGroup = g.append('g').attr('class', 'links');
-    const linkEl = linkGroup.selectAll('line')
-      .data(resolvedLinks)
-      .join('line')
+    // ---- Links ----
+    const linkEl = g.append('g').attr('class', 'links').selectAll('line')
+      .data(resolvedLinks).join('line')
       .attr('stroke', linkColor)
-      .attr('stroke-opacity', d => {
-        const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-        return isRingLink ? 0.85 : 0.4;
-      })
-      .attr('stroke-width', d => {
-        const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-        if (isRingLink) return 2.5;
-        return Math.max(0.8, Math.min(3, Math.log10(d.amount + 1) * 0.7));
-      })
-      .attr('marker-end', d => d.amount > 5000 ? 'url(#arrow-high)' : 'url(#arrow-normal)');
+      .attr('stroke-opacity', d => isRingLink(d) ? 0.85 : 0.4)
+      .attr('stroke-width',   d => isRingLink(d) ? 2.5 : Math.max(0.8, Math.min(3, Math.log10(d.amount + 1) * 0.7)))
+      .attr('marker-end',     d => d.amount > 5000 ? 'url(#arrow-high)' : 'url(#arrow-normal)');
 
-    const linkHitEl = g.append('g').attr('class', 'link-hits')
-      .selectAll('line')
-      .data(resolvedLinks)
-      .join('line')
-      .attr('stroke', 'transparent')
-      .attr('stroke-width', 14)
-      .style('cursor', 'pointer');
+    const linkHitEl = g.append('g').attr('class', 'link-hits').selectAll('line')
+      .data(resolvedLinks).join('line')
+      .attr('stroke', 'transparent').attr('stroke-width', 14).style('cursor', 'pointer');
 
     // ---- Ring halos ----
-    const ringHaloGroup = g.append('g').attr('class', 'ring-halos');
-    const ringHaloData = Array.from(ringGroups.entries()).map(([ringId]) => ({
-      ringId,
-      center: ringCenters.get(ringId),
-    }));
+    const ringHaloData = Array.from(ringGroups.entries()).map(([ringId]) => ({ ringId }));
+    const ringHalos = g.append('g').attr('class', 'ring-halos').selectAll('circle')
+      .data(ringHaloData).join('circle')
+      .attr('r', 60).attr('fill', 'rgba(255,0,255,0.04)')
+      .attr('stroke', '#ff00ff').attr('stroke-width', 1)
+      .attr('stroke-dasharray', '4,4').attr('opacity', 0.5);
 
-    const ringHalos = ringHaloGroup.selectAll('circle')
-      .data(ringHaloData)
-      .join('circle')
-      .attr('r', 60)
-      .attr('fill', 'rgba(255,0,255,0.04)')
-      .attr('stroke', '#ff00ff')
-      .attr('stroke-width', 1)
-      .attr('stroke-dasharray', '4,4')
-      .attr('opacity', 0.5);
+    // ---- Nodes ----
+    const nodeRadius = d => {
+      if (d.type === 'ring') return 13;
+      if (d.risk > 85)       return 11;
+      if (d.risk > 70)       return 9;
+      if (d.risk > 50)       return 7;
+      return 5;
+    };
+    const nodeFill = d => {
+      if (d.type === 'ring') return '#cc0033';
+      if (d.risk > 85)       return '#ff4455';
+      if (d.risk > 70)       return '#ff8844';
+      if (d.risk > 50)       return '#ffd93d';
+      return '#00f3ff';
+    };
+    const nodeStroke = d => {
+      if (d.type === 'ring') return '#ff00ff';
+      if (d.risk > 70)       return '#ff003c';
+      if (d.risk > 50)       return '#ffd93d';
+      return 'rgba(255,255,255,0.4)';
+    };
 
-    // ---- Node groups ----
-    const nodeGroup = g.append('g').attr('class', 'nodes');
-    const nodeEl = nodeGroup.selectAll('g')
-      .data(nodesCopy)
-      .join('g')
+    const nodeEl = g.append('g').attr('class', 'nodes').selectAll('g')
+      .data(nodesCopy).join('g')
       .attr('class', d => `node node-${d.type}`)
       .style('cursor', 'pointer')
       .call(d3.drag()
         .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
-        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+        .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
       );
-
-    const nodeRadius = d => {
-      if (d.type === 'ring') return 13;
-      if (d.risk > 85) return 11;
-      if (d.risk > 70) return 9;
-      if (d.risk > 50) return 7;
-      return 5;
-    };
-
-    const nodeFill = d => {
-      if (d.type === 'ring') return '#cc0033';
-      if (d.risk > 85) return '#ff4455';
-      if (d.risk > 70) return '#ff8844';
-      if (d.risk > 50) return '#ffd93d';
-      return '#00f3ff';
-    };
-
-    const nodeStroke = d => {
-      if (d.type === 'ring') return '#ff00ff';
-      if (d.risk > 70) return '#ff003c';
-      if (d.risk > 50) return '#ffd93d';
-      return 'rgba(255,255,255,0.4)';
-    };
 
     nodeEl.each(function (d) {
       const el = d3.select(this);
-      const r = nodeRadius(d);
+      const r  = nodeRadius(d);
 
       if (d.type === 'ring') {
         el.append('circle').attr('r', r + 10).attr('fill', 'none').attr('stroke', '#ff00ff')
@@ -525,7 +530,6 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
         el.append('circle').attr('r', r + 20).attr('fill', 'none').attr('stroke', '#ff00ff')
           .attr('stroke-width', 0.5).attr('stroke-opacity', 0.15);
       }
-
       if (d.risk > 60 && d.type !== 'ring') {
         el.append('circle').attr('r', r + 6).attr('fill', 'none')
           .attr('stroke', d.risk > 80 ? '#ff003c' : '#ffd93d')
@@ -536,48 +540,39 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
         .attr('stroke-width', d.type === 'ring' ? 2.5 : 1.5)
         .style('filter', d.type === 'ring' ? 'url(#glow)' : d.risk > 80 ? 'url(#glow-mild)' : 'none');
 
-      if (d.type === 'ring') {
+      if (d.type === 'ring')
         el.append('circle').attr('r', 3).attr('fill', '#ff00ff').attr('opacity', 0.9);
-      }
     });
 
     // ---- Labels ----
-    const labelGroup = g.append('g').attr('class', 'labels');
-    const labelEl = labelGroup.selectAll('text')
-      .data(nodesCopy)
-      .join('text')
+    const labelEl = g.append('g').attr('class', 'labels').selectAll('text')
+      .data(nodesCopy).join('text')
       .text(d => d.id.slice(0, 12))
-      .attr('font-size', d => d.type === 'ring' ? '10px' : '8.5px')
+      .attr('font-size',   d => d.type === 'ring' ? '10px' : '8.5px')
       .attr('font-family', 'JetBrains Mono, monospace')
-      .attr('fill', d => d.type === 'ring' ? '#ff88ff' : d.risk > 70 ? '#ffaa44' : 'rgba(255,255,255,0.7)')
+      .attr('fill',        d => d.type === 'ring' ? '#ff88ff' : d.risk > 70 ? '#ffaa44' : 'rgba(255,255,255,0.7)')
       .attr('font-weight', d => d.type === 'ring' ? '700' : '400')
       .style('pointer-events', 'none')
       .style('display', showLabels ? 'block' : 'none');
 
-    // ---- Tooltip helpers (use ref, not d3.select body) ----
-    const showTip = (html) => {
-      if (tooltipRef.current) {
-        tooltipRef.current.innerHTML = html;
-        tooltipRef.current.style.visibility = 'visible';
-      }
-    };
-    const moveTip = (event) => {
-      if (tooltipRef.current) {
-        tooltipRef.current.style.top = (event.pageY + 12) + 'px';
-        tooltipRef.current.style.left = (event.pageX + 12) + 'px';
-      }
-    };
-    const hideTip = () => {
-      if (tooltipRef.current) tooltipRef.current.style.visibility = 'hidden';
+    // ---- Tooltip helpers (ref-based, no DOM leak) ----
+    const tip = tooltipRef.current;
+    const showTip = html  => { if (tip) { tip.innerHTML = html; tip.style.visibility = 'visible'; } };
+    const moveTip = event => { if (tip) { tip.style.top = (event.pageY + 12) + 'px'; tip.style.left = (event.pageX + 12) + 'px'; } };
+    const hideTip = ()    => { if (tip) tip.style.visibility = 'hidden'; };
+
+    const resetLinks = () => {
+      linkEl
+        .attr('stroke-opacity', d => isRingLink(d) ? 0.85 : 0.4)
+        .attr('stroke-width',   d => isRingLink(d) ? 2.5 : Math.max(0.8, Math.min(3, Math.log10(d.amount + 1) * 0.7)));
     };
 
-    // ---- Interactions ----
+    // ---- Node interactions ----
     nodeEl
       .on('mouseenter', (event, d) => {
         linkEl
           .attr('stroke-opacity', l => (l.source.id === d.id || l.target.id === d.id) ? 1 : 0.05)
-          .attr('stroke-width', l => (l.source.id === d.id || l.target.id === d.id) ? 3.5 : 0.5);
-
+          .attr('stroke-width',   l => (l.source.id === d.id || l.target.id === d.id) ? 3.5 : 0.5);
         nodeEl.attr('opacity', n => {
           if (n.id === d.id) return 1;
           return resolvedLinks.some(l =>
@@ -585,7 +580,6 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
             (l.target.id === d.id && l.source.id === n.id)
           ) ? 1 : 0.15;
         });
-
         showTip(`
           <div class="tooltip-header">
             <span class="tooltip-id">${d.id}</span>
@@ -600,37 +594,20 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
         `);
       })
       .on('mousemove', moveTip)
-      .on('mouseleave', () => {
-        linkEl
-          .attr('stroke-opacity', d => {
-            const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-            return isRingLink ? 0.85 : 0.4;
-          })
-          .attr('stroke-width', d => {
-            const isRingLink = d.source.ringId && d.target.ringId && d.source.ringId === d.target.ringId;
-            if (isRingLink) return 2.5;
-            return Math.max(0.8, Math.min(3, Math.log10(d.amount + 1) * 0.7));
-          });
-        nodeEl.attr('opacity', 1);
-        hideTip();
-      })
-      .on('click', (event, d) => {
-        event.stopPropagation();
-        onNodeSelect(d);
-      });
+      .on('mouseleave', () => { resetLinks(); nodeEl.attr('opacity', 1); hideTip(); })
+      .on('click', (event, d) => { event.stopPropagation(); onNodeSelect(d); });
 
+    // ---- Link interactions ----
     linkHitEl
-      .on('mouseenter', (event, d) => {
-        showTip(`
-          <div class="tooltip-header"><span class="tooltip-id">Transaction</span></div>
-          <div class="tooltip-body">
-            <div class="tooltip-row"><span>From</span><span>${d.source.id}</span></div>
-            <div class="tooltip-row"><span>To</span><span>${d.target.id}</span></div>
-            <div class="tooltip-row"><span>Amount</span><span class="amount">$${Number(d.amount).toLocaleString()}</span></div>
-            ${d.id ? `<div class="tooltip-row"><span>TX ID</span><span>${String(d.id).slice(0, 14)}…</span></div>` : ''}
-          </div>
-        `);
-      })
+      .on('mouseenter', (event, d) => showTip(`
+        <div class="tooltip-header"><span class="tooltip-id">Transaction</span></div>
+        <div class="tooltip-body">
+          <div class="tooltip-row"><span>From</span><span>${d.source.id}</span></div>
+          <div class="tooltip-row"><span>To</span><span>${d.target.id}</span></div>
+          <div class="tooltip-row"><span>Amount</span><span class="amount">$${Number(d.amount).toLocaleString()}</span></div>
+          ${d.id ? `<div class="tooltip-row"><span>TX ID</span><span>${String(d.id).slice(0, 14)}…</span></div>` : ''}
+        </div>
+      `))
       .on('mousemove', moveTip)
       .on('mouseleave', hideTip);
 
@@ -638,16 +615,12 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 
     // ---- Tick ----
     sim.on('tick', () => {
-      linkEl
-        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-      linkHitEl
-        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      linkEl.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      linkHitEl.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+               .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
       nodeEl.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
-      labelEl
-        .attr('x', d => (d.x ?? 0) + nodeRadius(d) + 4)
-        .attr('y', d => (d.y ?? 0) + 3);
+      labelEl.attr('x', d => (d.x ?? 0) + nodeRadius(d) + 4).attr('y', d => (d.y ?? 0) + 3);
 
       ringHalos.each(function (rd) {
         const members = nodesCopy.filter(n => n.ringId === rd.ringId);
@@ -655,9 +628,7 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
         const cx = d3.mean(members, m => m.x ?? 0);
         const cy = d3.mean(members, m => m.y ?? 0);
         const maxDist = d3.max(members, m => Math.hypot((m.x ?? 0) - cx, (m.y ?? 0) - cy));
-        d3.select(this)
-          .attr('cx', cx).attr('cy', cy)
-          .attr('r', Math.max(50, (maxDist || 0) + 28));
+        d3.select(this).attr('cx', cx).attr('cy', cy).attr('r', Math.max(50, (maxDist || 0) + 28));
       });
     });
 
@@ -665,14 +636,14 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
   }, [displayNodes, displayLinks, showLabels, onNodeSelect, ringMemberMap]);
 
   const resetZoom = () => {
-    if (svgRef.current && zoomRef.current) {
+    if (svgRef.current && zoomRef.current)
       d3.select(svgRef.current).transition().duration(600).call(zoomRef.current.transform, d3.zoomIdentity);
-    }
   };
 
   const togglePhysics = () => {
     if (!simRef.current) return;
-    if (physics) simRef.current.stop(); else simRef.current.alphaTarget(0.3).restart();
+    if (physics) simRef.current.stop();
+    else         simRef.current.alphaTarget(0.3).restart();
     setPhysics(p => !p);
   };
 
@@ -716,7 +687,7 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
             <div className="node-panel-body">
               <div className="risk-badge" style={{
                 background: selectedNode.risk > 80 ? 'rgba(255,0,60,0.2)' : selectedNode.risk > 50 ? 'rgba(255,217,61,0.2)' : 'rgba(0,243,255,0.2)',
-                color: selectedNode.risk > 80 ? '#ff003c' : selectedNode.risk > 50 ? '#ffd93d' : '#00f3ff',
+                color:      selectedNode.risk > 80 ? '#ff003c' : selectedNode.risk > 50 ? '#ffd93d' : '#00f3ff',
               }}>
                 Risk Score: {Number(selectedNode.risk).toFixed(1)}
               </div>
@@ -746,9 +717,7 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
         <div className="stat"><span className="stat-num">{displayNodes.filter(n => n.type === 'ring').length}</span><span>Ring Members</span></div>
         <div className="stat"><span className="stat-num">{displayNodes.filter(n => n.risk > 70).length}</span><span>Critical</span></div>
         <div className="stat">
-          <span className="stat-num">
-            ${(displayLinks.reduce((s, l) => s + (l.amount || 0), 0) / 1_000_000).toFixed(2)}M
-          </span>
+          <span className="stat-num">${(displayLinks.reduce((s, l) => s + (l.amount || 0), 0) / 1_000_000).toFixed(2)}M</span>
           <span>Flow</span>
         </div>
       </div>
@@ -762,10 +731,10 @@ const GraphVisualization = ({ analysisData, searchTerm, onNodeSelect, selectedNo
 const StatsPanel = ({ analysisData, onDownload }) => {
   if (!analysisData) return null;
   const { suspicious_accounts = [], fraud_rings = [], summary = {} } = analysisData;
-  const topAccounts = suspicious_accounts.slice(0, 5);
+  const topAccounts   = suspicious_accounts.slice(0, 5);
   const patternCounts = {
-    cycle: fraud_rings.filter(r => r.pattern_type === 'cycle').length,
-    smurfing: suspicious_accounts.filter(a => a.detected_patterns?.includes('smurfing') || a.detected_patterns?.includes('fan_out')).length,
+    cycle:         fraud_rings.filter(r => r.pattern_type === 'cycle').length,
+    smurfing:      suspicious_accounts.filter(a => a.detected_patterns?.includes('smurfing') || a.detected_patterns?.includes('fan_out')).length,
     high_velocity: suspicious_accounts.filter(a => a.detected_patterns?.includes('high_velocity')).length,
   };
 
@@ -820,7 +789,10 @@ const StatsPanel = ({ analysisData, onDownload }) => {
 
       <div className="stat-card">
         <h4>BACKEND SOURCE</h4>
-        <div className="flow-stat"><Icons.Server /><span style={{marginLeft:6, fontSize:'11px', color:'#00f3ff'}}>{API_BASE}</span></div>
+        <div className="flow-stat">
+          <Icons.Server />
+          <span style={{ marginLeft: 6, fontSize: '11px', color: '#00f3ff' }}>{API_BASE}</span>
+        </div>
       </div>
 
       <button className="btn-download" onClick={() => onDownload(analysisData)}>
@@ -842,9 +814,7 @@ const RingsTable = ({ fraudRings }) => (
     <div className="table-scroll">
       <table>
         <thead>
-          <tr>
-            <th>Ring ID</th><th>Pattern Type</th><th>Members</th><th>Risk Score</th><th>Account IDs</th>
-          </tr>
+          <tr><th>Ring ID</th><th>Pattern Type</th><th>Members</th><th>Risk Score</th><th>Account IDs</th></tr>
         </thead>
         <tbody>
           {(fraudRings || []).map(ring => (
@@ -870,39 +840,32 @@ const RingsTable = ({ fraudRings }) => (
 // ============================================
 // MAIN APP
 // ============================================
-
-// FIX: Safe fetch with timeout that works in all environments
-const fetchWithTimeout = (url, options = {}, ms = 5000) => {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(id));
-};
-
 const RADIO = () => {
-  const [analysisData, setAnalysisData] = useState(null);
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [msg, setMsg] = useState('');
-  const [search, setSearch] = useState('');
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [error, setError] = useState(null);
+  const [analysisData,  setAnalysisData]  = useState(null);
+  const [processing,    setProcessing]    = useState(false);
+  const [progress,      setProgress]      = useState(0);
+  const [msg,           setMsg]           = useState('');
+  const [search,        setSearch]        = useState('');
+  const [selectedNode,  setSelectedNode]  = useState(null);
+  const [error,         setError]         = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking');
 
-  // ---- Ping backend on mount ----
+  // ---- Ping backend on mount + every 10 min to prevent cold-start ----
   useEffect(() => {
     const ping = async () => {
       try {
-        const res = await fetchWithTimeout(`${API_BASE}/`, {}, 5000);
+        const res = await fetchWithTimeout(`${API_BASE}/`, { headers: authHeaders() }, 8000);
         setBackendStatus(res.ok ? 'online' : 'offline');
       } catch {
         setBackendStatus('offline');
       }
     };
     ping();
+    const keepAlive = setInterval(ping, 10 * 60 * 1000);   // every 10 min
+    return () => clearInterval(keepAlive);
   }, []);
 
-  // ---- Upload CSV to backend ----
+  // ---- Upload CSV ----
   const processFile = useCallback(async (file) => {
     setError(null);
     setProcessing(true);
@@ -919,13 +882,11 @@ const RADIO = () => {
       [92, '> Applying dynamic threshold...'],
     ];
 
-    let msgIdx = 0;
-    const progressTimer = setInterval(() => {
-      if (msgIdx < progressMsgs.length) {
-        const [p, m] = progressMsgs[msgIdx];
-        setProgress(p);
-        setMsg(m);
-        msgIdx++;
+    let idx = 0;
+    const timer = setInterval(() => {
+      if (idx < progressMsgs.length) {
+        const [p, m] = progressMsgs[idx];
+        setProgress(p); setMsg(m); idx++;
       }
     }, 600);
 
@@ -934,18 +895,19 @@ const RADIO = () => {
       formData.append('file', file, file.name);
 
       const res = await fetch(`${API_BASE}/upload/`, {
-        method: 'POST',
-        body: formData,
+        method:  'POST',
+        headers: authHeaders(),       // API key header — Content-Type NOT set (browser handles multipart)
+        body:    formData,
       });
 
-      clearInterval(progressTimer);
+      clearInterval(timer);
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({ detail: res.statusText }));
-        const detail = typeof errBody.detail === 'object'
+        const detail  = typeof errBody.detail === 'object'
           ? JSON.stringify(errBody.detail)
           : errBody.detail || res.statusText;
-        throw new Error(`Backend error ${res.status}: ${detail}`);
+        throw new Error(`${res.status}: ${detail}`);
       }
 
       const data = await res.json();
@@ -956,44 +918,44 @@ const RADIO = () => {
 
       setProgress(100);
       setMsg('> Analysis complete ✓');
-
       await new Promise(r => setTimeout(r, 300));
 
       setAnalysisData({
         suspicious_accounts: data.suspicious_accounts || [],
-        fraud_rings: data.fraud_rings || [],
-        summary: data.summary || {},
+        fraud_rings:         data.fraud_rings         || [],
+        summary:             data.summary             || {},
         nodeMap,
         links,
       });
 
     } catch (err) {
-      clearInterval(progressTimer);
+      clearInterval(timer);
       console.error('Upload failed:', err);
-      setError(err.message || 'Upload failed. Check backend URL and CORS settings.');
+      setError(friendlyError(err.message || 'Upload failed.'));
       setBackendStatus('offline');
     } finally {
       setProcessing(false);
     }
   }, []);
 
-  // ---- Download forensics report ----
+  // ---- Download report ----
   const downloadReport = useCallback((data) => {
     const report = {
+      generated_at: new Date().toISOString(),
       suspicious_accounts: (data.suspicious_accounts || []).map(a => ({
-        account_id: String(a.account_id),
-        suspicion_score: parseFloat(Number(a.suspicion_score || 0).toFixed(1)),
+        account_id:        String(a.account_id),
+        suspicion_score:   parseFloat(Number(a.suspicion_score || 0).toFixed(1)),
         detected_patterns: Array.isArray(a.detected_patterns) ? a.detected_patterns : [],
-        ring_id: a.ring_id || null,
+        ring_id:           a.ring_id || null,
       })).sort((x, y) => y.suspicion_score - x.suspicion_score),
       fraud_rings: data.fraud_rings || [],
-      summary: data.summary || {},
+      summary:     data.summary     || {},
     };
 
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
     a.download = `forensics_report_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
@@ -1002,12 +964,9 @@ const RADIO = () => {
   }, []);
 
   const resetApp = () => {
-    setAnalysisData(null);
-    setError(null);
-    setProgress(0);
-    setMsg('');
-    setSearch('');
-    setSelectedNode(null);
+    setAnalysisData(null); setError(null);
+    setProgress(0); setMsg('');
+    setSearch(''); setSelectedNode(null);
   };
 
   return (
