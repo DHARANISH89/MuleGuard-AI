@@ -1,22 +1,21 @@
 # MuleGuard AI
-
 MuleGuard AI is a Financial Forensics Engine built to detect money laundering and money mule accounts using advanced graph-based algorithms. 
-
 The application is split into a robust **FastAPI backend** that processes transaction data into graphs and applies anomaly detection, and a sleek **React frontend** that visualizes the network topology and flags suspicious rings.
-
 ![MuleGuard Concept](https://img.shields.io/badge/Status-Active-brightgreen)
 ![Python Backend](https://img.shields.io/badge/Backend-FastAPI-009688)
 ![React Frontend](https://img.shields.io/badge/Frontend-React-61dafb)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Visit%20App-blue?style=flat&logo=vercel)](https://mule-guard-ai-7j47.vercel.app/)
+
+## 🌐 Live Demo
+
+> **[https://mule-guard-ai-7j47.vercel.app/](https://mule-guard-ai-7j47.vercel.app/)**
 
 ## 📁 Project Structure
-
 This repository contains two main sub-projects:
-
 - `frontend/`: The React-based dashboard UI and graph visualization (using D3.js).
 - `backend/`: The FastAPI backend with NetworkX, Pandas, Scikit-learn for graph logic.
 
 ## 🚀 Quick Start (Local Development)
-
 The easiest way to run the entire stack locally is using **Docker Compose**.
 
 ### Prerequisites
@@ -28,18 +27,15 @@ The easiest way to run the entire stack locally is using **Docker Compose**.
    git clone https://github.com/DHARANISH89/MuleGuard.git
    cd MuleGuard
    ```
-
 2. Spin up both the frontend and backend using Docker Compose:
    ```bash
    docker compose up -d --build
    ```
-
 3. Access the application:
    - **Frontend UI**: [http://localhost:3000](http://localhost:3000)
    - **Backend API**: [http://localhost:8000](http://localhost:8000)
 
 ## ☁️ Deployment
-
 MuleGuard is modular and designed to be deployed across specialized cloud platforms for cost efficiency and performance.
 
 ### 1. Deploy the Backend (FastAPI) to Render
